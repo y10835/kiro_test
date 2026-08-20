@@ -310,8 +310,9 @@ def _read_csv_with_schema(filepath: Path, schema: TableSchema) -> pd.DataFrame:
         if col_name not in df.columns:
             continue
         col_def = next(c for c in schema.columns if c.name == col_name)
-        if col_def.nullable:
-            # Nullable dates: empty string → None
+        has_empty = (df[col_name] == "").any()
+        if col_def.nullable or has_empty:
+            # Nullable dates (or corrupted non-nullable): empty string → None
             df[col_name] = df[col_name].apply(
                 lambda x: pd.Timestamp(x).date() if x != "" else None
             )
@@ -324,14 +325,15 @@ def _read_csv_with_schema(filepath: Path, schema: TableSchema) -> pd.DataFrame:
         if col_name not in df.columns:
             continue
         col_def = next(c for c in schema.columns if c.name == col_name)
-        if col_def.nullable:
-            # Nullable ints: empty string → NaN, then use Int64 (nullable int)
+        has_empty = (df[col_name] == "").any()
+        if col_def.nullable or has_empty:
+            # Nullable ints (or corrupted non-nullable): empty string → NaN, then use Int64
             df[col_name] = df[col_name].apply(
                 lambda x: int(x) if x != "" else pd.NA
             )
             df[col_name] = df[col_name].astype("Int64")
         else:
-            # Non-nullable ints: parse directly as int64
+            # Non-nullable ints with no empties: parse directly as int64
             df[col_name] = df[col_name].astype("int64")
 
     # Parse float columns
@@ -339,7 +341,8 @@ def _read_csv_with_schema(filepath: Path, schema: TableSchema) -> pd.DataFrame:
         if col_name not in df.columns:
             continue
         col_def = next(c for c in schema.columns if c.name == col_name)
-        if col_def.nullable:
+        has_empty = (df[col_name] == "").any()
+        if col_def.nullable or has_empty:
             df[col_name] = df[col_name].apply(
                 lambda x: float(x) if x != "" else float("nan")
             )
@@ -351,8 +354,9 @@ def _read_csv_with_schema(filepath: Path, schema: TableSchema) -> pd.DataFrame:
         if col_name not in df.columns:
             continue
         col_def = next(c for c in schema.columns if c.name == col_name)
-        if col_def.nullable:
-            # Nullable strings: empty string → None
+        has_empty = (df[col_name] == "").any()
+        if col_def.nullable or has_empty:
+            # Nullable strings (or corrupted non-nullable): empty string → None
             df[col_name] = df[col_name].apply(
                 lambda x: x if x != "" else None
             )

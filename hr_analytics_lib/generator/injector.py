@@ -151,7 +151,10 @@ def _sample_with_skip_reselect(
     """Sample candidates with skip-and-reselect for duplicates.
 
     Track a set of (defect_type, table, row_index, column) already corrupted.
-    Skip any candidate that matches an existing corruption site for the SAME defect_type.
+    Skip any candidate that matches an existing corruption site for ANY defect_type
+    on the same (table, row_index, column), ensuring each cell is only corrupted
+    once across all defect types. This guarantees the validator can detect every
+    injected defect from the final data state.
 
     Parameters
     ----------
@@ -174,6 +177,12 @@ def _sample_with_skip_reselect(
     if not candidates:
         return []
 
+    # Build a set of (table, row_index, column) tuples for ANY defect type
+    # to prevent cross-type collisions that would make earlier injections invisible
+    all_corrupted_cells: set[tuple[str, int, str]] = {
+        (site[1], site[2], site[3]) for site in corrupted_sites
+    }
+
     # Shuffle candidates deterministically
     indices = rng.permutation(len(candidates))
     selected: list = []
@@ -187,15 +196,15 @@ def _sample_with_skip_reselect(
             # DatePairSite: (table, row_idx, start_col, end_col)
             # Check both columns
             table_name, row_idx, start_col, end_col = candidate  # type: ignore[misc]
-            site_key_start = (defect_type.value, table_name, row_idx, start_col)
-            site_key_end = (defect_type.value, table_name, row_idx, end_col)
-            if site_key_start in corrupted_sites or site_key_end in corrupted_sites:
+            cell_key_start = (table_name, row_idx, start_col)
+            cell_key_end = (table_name, row_idx, end_col)
+            if cell_key_start in all_corrupted_cells or cell_key_end in all_corrupted_cells:
                 continue
         else:
             # CandidateSite: (table, row_idx, column)
             table_name, row_idx, col_name = candidate  # type: ignore[misc]
-            site_key = (defect_type.value, table_name, row_idx, col_name)
-            if site_key in corrupted_sites:
+            cell_key = (table_name, row_idx, col_name)
+            if cell_key in all_corrupted_cells:
                 continue
         selected.append(candidate)
 

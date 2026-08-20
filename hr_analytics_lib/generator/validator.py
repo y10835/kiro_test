@@ -82,15 +82,20 @@ def _check_non_nullable(
 def _check_pk_uniqueness(
     table_name: str, df: pd.DataFrame, schema: TableSchema
 ) -> list[Violation]:
-    """Check for duplicate values in primary key columns (Task 7.2)."""
+    """Check for duplicate values in primary key columns (Task 7.2).
+
+    Marks ALL rows that participate in a duplicate group (keep=False),
+    so both the original and the corrupted copy are flagged. This ensures
+    the validator catches the injected row regardless of sort order.
+    """
     violations: list[Violation] = []
     pk_columns = schema.pk_columns
 
     for col_name in pk_columns:
         if col_name not in df.columns:
             continue
-        # Find duplicated values (mark all occurrences after the first)
-        duplicated_mask = df[col_name].duplicated(keep="first")
+        # Find ALL rows participating in duplicates (mark every occurrence)
+        duplicated_mask = df[col_name].duplicated(keep=False)
         dup_indices = df.index[duplicated_mask].tolist()
         for idx in dup_indices:
             violations.append(
@@ -156,6 +161,9 @@ def _check_temporal_ordering(
 
     - assignments: start_date <= end_date (when end_date is not null)
     - performance_reviews: review_period_start < review_period_end
+
+    Reports violations on BOTH columns of the date pair (start and end)
+    to match the injector's manifest which records both columns.
     """
     violations: list[Violation] = []
 
@@ -167,6 +175,16 @@ def _check_temporal_ordering(
                 if pd.isna(start) or pd.isna(end):
                     continue
                 if start > end:
+                    # Report on both columns — the swap affects both
+                    violations.append(
+                        Violation(
+                            table=table_name,
+                            row_index=idx,
+                            column="start_date",
+                            violation_type=DefectType.DATE_CONTRADICTION.value,
+                            message=f"start_date ({start}) > end_date ({end}) at row {idx}",
+                        )
+                    )
                     violations.append(
                         Violation(
                             table=table_name,
@@ -185,6 +203,17 @@ def _check_temporal_ordering(
                 if pd.isna(start) or pd.isna(end):
                     continue
                 if start >= end:
+                    # Report on both columns — the swap affects both
+                    violations.append(
+                        Violation(
+                            table=table_name,
+                            row_index=idx,
+                            column="review_period_start",
+                            violation_type=DefectType.DATE_CONTRADICTION.value,
+                            message=f"review_period_start ({start}) >= review_period_end ({end}) "
+                            f"at row {idx}",
+                        )
+                    )
                     violations.append(
                         Violation(
                             table=table_name,
@@ -206,7 +235,8 @@ def _check_value_boundaries(
 
     - employees.level: 1 <= level <= 15
     - performance_reviews.rating: 1 <= rating <= 5
-    - compensation.annual_salary: 0 < salary <= 10_000_000
+    - compensation.annual_salary: must be in (0, 1_000_000]
+      (realistic salary ceiling; ×100 injection always exceeds this)
     """
     violations: list[Violation] = []
 
@@ -247,14 +277,14 @@ def _check_value_boundaries(
             salary = df.at[idx, "annual_salary"]
             if pd.isna(salary):
                 continue
-            if salary <= 0 or salary > 10_000_000:
+            if salary <= 0 or salary > 1_000_000:
                 violations.append(
                     Violation(
                         table=table_name,
                         row_index=idx,
                         column="annual_salary",
                         violation_type=DefectType.VALUE_OUT_OF_RANGE.value,
-                        message=f"annual_salary value {salary} out of range (0, 10000000] "
+                        message=f"annual_salary value {salary} out of range (0, 1000000] "
                         f"at row {idx}",
                     )
                 )
