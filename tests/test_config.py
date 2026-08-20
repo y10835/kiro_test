@@ -131,3 +131,17 @@ class TestValidConfig:
         result = config.resolved_seed
         assert isinstance(result, int)
         assert result >= 0
+
+
+
+# --- Property 10: Invalid Config Rejection (Hypothesis) ---
+from hypothesis import given, settings
+from tests.conftest import invalid_generation_config
+
+@given(invalid_kwargs=invalid_generation_config())
+@settings(max_examples=50)
+def test_invalid_config_rejection_property(invalid_kwargs):
+    """Property 10: All invalid configs raise ConfigError."""
+    import pytest
+    with pytest.raises(ConfigError):
+        GenerationConfig(**invalid_kwargs)
