@@ -227,13 +227,30 @@ def aggregate_org_periods(
         return True
 
     # We need to track the department and level of each employee over time.
-    # Build state tracking: for each employee, track current department and level over time.
-    # We reconstruct state by replaying events in chronological order.
+    # Build state tracking: for each employee, determine INITIAL department and level
+    # from their HIRE event (not from employees_df which reflects final state).
+    # We then reconstruct state at any point by replaying events from the initial state.
     emp_state: dict[str, dict] = {}
+
+    # Build a lookup from HIRE events to get initial department and level at hire time.
+    hire_event_lookup: dict[str, dict] = {}
+    for evt in hire_events:
+        hire_event_lookup[evt["employee_id"]] = evt
+
     for rec in emp_records:
-        emp_state[rec["employee_id"]] = {
-            "department_id": rec["department_id"],
-            "level": rec["level"],
+        emp_id = rec["employee_id"]
+        hire_evt = hire_event_lookup.get(emp_id)
+        if hire_evt:
+            # Use HIRE event's to_department_id and to_level as initial state
+            initial_dept = hire_evt.get("to_department_id") or rec["department_id"]
+            initial_level = hire_evt.get("to_level") if hire_evt.get("to_level") is not None else rec["level"]
+        else:
+            # Fallback to employees_df values (shouldn't happen in clean data)
+            initial_dept = rec["department_id"]
+            initial_level = rec["level"]
+        emp_state[emp_id] = {
+            "department_id": initial_dept,
+            "level": initial_level,
             "hire_date": rec["hire_date"],
             "separation_date": rec["separation_date"],
         }
@@ -246,9 +263,11 @@ def aggregate_org_periods(
             matching = [r for r in emp_records if r["employee_id"] == emp_id]
             if matching:
                 rec = matching[0]
+                initial_dept = evt.get("to_department_id") or rec["department_id"]
+                initial_level = evt.get("to_level") if evt.get("to_level") is not None else rec["level"]
                 emp_state[emp_id] = {
-                    "department_id": rec["department_id"],
-                    "level": rec["level"],
+                    "department_id": initial_dept,
+                    "level": initial_level,
                     "hire_date": rec["hire_date"],
                     "separation_date": rec["separation_date"],
                 }
@@ -307,17 +326,22 @@ def aggregate_org_periods(
         period_label = _period_label(period_start)
 
         # Determine which employees are active during this period
-        # An employee is "in headcount" at period start if:
-        #   hire_date <= period_start AND (separation_date is None OR separation_date >= period_start)
-        # For the first period, opening = count of employees hired on or before period_start
-        # For subsequent periods, opening = previous closing (period-chain continuity)
+        # An employee is in the opening headcount if:
+        #   hire_date < period_start (hired before this period) AND
+        #   (separation_date is None OR separation_date >= period_start)
+        # For the first period, opening = 0 (no one hired before start).
+        # For subsequent periods, opening = previous closing (period-chain continuity).
 
         # Identify active employees at period_start (for opening count)
+        # Opening = headcount at the END of the prior period (before any events in this period).
+        # hire_date < period_start: employee was hired before this period.
+        # separation_date is None OR >= period_start: not yet separated at the start.
+        # Note: employees hired ON period_start are counted as HIRES in this period, not opening.
         active_at_start: list[str] = []
         for emp_id, state in emp_state.items():
             hire_d = state["hire_date"]
             sep_d = state["separation_date"]
-            if hire_d is None or hire_d > period_start:
+            if hire_d is None or hire_d >= period_start:
                 continue
             if sep_d is not None and sep_d < period_start:
                 continue
