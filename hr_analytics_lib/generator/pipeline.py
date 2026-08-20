@@ -194,9 +194,12 @@ def generate(config: GenerationConfig) -> GeneratedDataset:
     )
     defect_counts: dict[str, int] = {dt.value: 0 for dt in DefectType}
 
-    # TODO: Task 6 will implement injection here
-    # if config.corruption_config:
-    #     tables, defect_manifest = inject_defects(tables, config, rngs["injector"])
+    if config.corruption_config:
+        from hr_analytics_lib.generator.injector import inject_defects
+
+        tables, defect_manifest, defect_counts = inject_defects(
+            tables, config.corruption_config, rngs["injector"]
+        )
 
     # 12. Build metadata
     table_row_counts = {name: len(df) for name, df in tables.items()}
